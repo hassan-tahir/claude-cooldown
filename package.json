@@ -2,8 +2,9 @@
   "name": "claude-cooldown",
   "displayName": "Claude Cooldown & Retro Screensaver",
   "description": "Retro CRT ASCII screensaver & 5-hour quota countdown that triggers when Claude hits a 429 rate limit.",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "publisher": "HassanTahir1",
+  "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
