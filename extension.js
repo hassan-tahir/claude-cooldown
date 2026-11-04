@@ -97,6 +97,16 @@ function triggerScreensaver(context, options = {}) {
   }
 }
 
+// Runs a workbench command, returning false instead of throwing if this VS Code version lacks it
+async function runCommand(command) {
+  try {
+    await vscode.commands.executeCommand(command);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function openWebviewScreensaver(context, resetTime, mode) {
   const config = vscode.workspace.getConfiguration('claudeSaver');
   const useZen = config.get('autoFullscreenZenMode', true);
@@ -114,16 +124,29 @@ function openWebviewScreensaver(context, resetTime, mode) {
       }
     );
 
+    // Group count when we maximized; if our group gets removed on close, VS Code un-maximizes by itself
+    let maximizedGroupCount = 0;
+
     if (useZen) {
-      vscode.commands.executeCommand('workbench.action.toggleZenMode');
+      (async () => {
+        await runCommand('workbench.action.toggleZenMode');
+        // Zen mode leaves the secondary sidebar and other editor groups visible, so hide them too
+        await runCommand('workbench.action.closeAuxiliaryBar');
+        if (vscode.window.tabGroups.all.length > 1 && await runCommand('workbench.action.toggleMaximizeEditorGroup')) {
+          maximizedGroupCount = vscode.window.tabGroups.all.length;
+        }
+      })();
     }
 
-    currentPanel.onDidDispose(() => {
+    currentPanel.onDidDispose(async () => {
       currentPanel = undefined;
       statusBarItem.text = '$(terminal) Claude Quota: OK';
       statusBarItem.backgroundColor = undefined;
       if (useZen) {
-        vscode.commands.executeCommand('workbench.action.toggleZenMode');
+        if (maximizedGroupCount && vscode.window.tabGroups.all.length === maximizedGroupCount) {
+          await runCommand('workbench.action.toggleMaximizeEditorGroup');
+        }
+        await runCommand('workbench.action.toggleZenMode');
       }
     }, null, context.subscriptions);
   }
