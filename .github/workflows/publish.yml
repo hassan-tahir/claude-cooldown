@@ -1,0 +1,23 @@
+name: Publish Extension
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Required for Trusted Publishing
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish --packagePath ./claude-cooldown-1.0.0.vsix

@@ -1,0 +1,59 @@
+{
+  "name": "claude-cooldown",
+  "displayName": "Claude Cooldown & Retro Screensaver",
+  "description": "Retro CRT ASCII screensaver & 5-hour quota countdown that triggers when Claude hits a 429 rate limit.",
+  "version": "1.0.0",
+  "publisher": "HassanTahir1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeSaver.startWebview",
+        "title": "Claude Cooldown: Launch Inside VS Code (Webview)"
+      },
+      {
+        "command": "claudeSaver.startExternalKiosk",
+        "title": "Claude Cooldown: Launch Fullscreen Browser Kiosk"
+      },
+      {
+        "command": "claudeSaver.simulateRateLimit",
+        "title": "Claude Cooldown: Simulate 429 Rate Limit (Test Trigger)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claudeSaver.startWebview",
+        "key": "ctrl+alt+s",
+        "mac": "cmd+alt+s"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Cooldown Screensaver",
+      "properties": {
+        "claudeSaver.launchTarget": {
+          "type": "string",
+          "enum": ["vscode-webview", "external-kiosk", "both"],
+          "default": "vscode-webview",
+          "description": "Where to open the screensaver when a rate limit is detected."
+        },
+        "claudeSaver.autoFullscreenZenMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically toggle VS Code Zen Mode (fullscreen, hidden sidebars) when the Webview opens."
+        },
+        "claudeSaver.defaultMode": {
+          "type": "string",
+          "enum": ["1", "2", "3"],
+          "default": "3",
+          "description": "1 = DVD Bounce, 2 = Matrix 429 Panic, 3 = Countdown & Grass Toucher"
+        }
+      }
+    }
+  }
+}

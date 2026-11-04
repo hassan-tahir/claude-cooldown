@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>429: CLAUDE_LIMIT_REACHED.SCR</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;0,800;1,400&family=VT323&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0b0a09;
+            --primary: #d97757;
+            --primary-glow: rgba(217, 119, 87, 0.45);
+            --secondary: #e8b999;
+            --dim: #6e5246;
+            --danger: #ef4444;
+        }
+
+        [data-theme="amber"] {
+            --bg-color: #0c0905;
+            --primary: #ffb000;
+            --primary-glow: rgba(255, 176, 0, 0.45);
+            --secondary: #ffd573;
+            --dim: #705008;
+        }
+
+        [data-theme="phosphor"] {
+            --bg-color: #050b07;
+            --primary: #33ff66;
+            --primary-glow: rgba(51, 255, 102, 0.45);
+            --secondary: #99ffb3;
+            --dim: #146328;
+        }
+
+        [data-theme="cyber"] {
+            --bg-color: #07060f;
+            --primary: #00f0ff;
+            --primary-glow: rgba(0, 240, 255, 0.45);
+            --secondary: #ff2a85;
+            --dim: #1b5c69;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            color: var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+            overflow: hidden;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* CRT Scanline & Flicker Overlay */
+        .crt-overlay {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 50;
+            background: 
+                linear-gradient(
+                    rgba(18, 16, 16, 0) 50%, 
+                    rgba(0, 0, 0, 0.32) 50%
+                ),
+                radial-gradient(
+                    circle at center,
+                    transparent 60%,
+                    rgba(0, 0, 0, 0.75) 100%
+                );
+            background-size: 100% 4px, 100% 100%;
+        }
+
+        .crt-flicker {
+            animation: flicker 0.15s infinite;
+        }
+
+        @keyframes flicker {
+            0% { opacity: 0.985; }
+            50% { opacity: 1; }
+            100% { opacity: 0.99; }
+        }
+
+        .glow-text {
+            text-shadow: 0 0 8px var(--primary-glow), 0 0 2px var(--primary);
+        }
+
+        .glow-box {
+            box-shadow: 0 0 18px var(--primary-glow), inset 0 0 12px var(--primary-glow);
+            border-color: var(--primary);
+        }
+
+        .vt-font {
+            font-family: 'VT323', monospace;
+        }
+
+        /* DVD Bouncer Card */
+        #dvd-box {
+            position: absolute;
+            will-change: transform;
+            background: rgba(11, 10, 9, 0.92);
+            border: 2px solid var(--primary);
+            padding: 1.25rem 1.5rem;
+            border-radius: 0.375rem;
+            max-width: 470px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        /* Custom Scrollbar for logs */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0b0a09;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--dim);
+            border-radius: 3px;
+        }
+
+        /* HUD transition */
+        #hud-bar {
+            transition: opacity 0.4s ease, transform 0.4s ease;
+        }
+        #hud-bar.hud-hidden {
+            opacity: 0;
+            transform: translate(-50%, 24px);
+            pointer-events: none;
+        }
+
+        .cursor-none-mode {
+            cursor: none !important;
+        }
+
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.82; transform: scale(0.992); }
+        }
+        .animate-pulse-slow {
+            animation: pulse-slow 2.6s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="crt-flicker" data-theme="claude">
+
+    <!-- CRT Scanlines & Vignette -->
+    <div id="crt-layer" class="crt-overlay"></div>
+
+    <!-- Top Status Telemetry Bar -->
+    <div class="fixed top-0 left-0 right-0 z-20 flex flex-wrap items-center justify-between px-5 py-3 text-xs tracking-wider border-b border-current/15 bg-black/40 backdrop-blur-xs">
+        <div class="flex items-center gap-3">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+            <span class="font-bold glow-text">ANTHROPIC_CLI // v3.7.429-SONNET</span>
+            <span class="hidden sm:inline opacity-60">| SESSION: HALTED</span>
+        </div>
+        <div class="flex items-center gap-5">
+            <span id="top-stats-counter" class="opacity-80">CORNER HITS: <strong id="corner-hit-val">0</strong> | WALL BOUNCES: <strong id="wall-hit-val">0</strong></span>
+            <span id="live-clock" class="opacity-75 hidden md:inline">00:00:00</span>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         MODE 1: DVD BOUNCE MODE
+         ========================================== -->
+    <main id="mode-1" class="relative w-full h-full overflow-hidden">
+        <!-- Subtle background watermark ASCII -->
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-5 select-none">
+            <pre class="text-[10px] sm:text-xs leading-tight font-mono text-center">
+   ▄████████  ▄█          ▄████████ ███    █▄  ████████▄     ▄████████ 
+  ███    ███ ███         ███    ███ ███    ███ ███   ▀███   ███    ███ 
+  ███    █▀  ███         ███    ███ ███    ███ ███    ███   ███    █▀  
+  ███        ███         ███    ███ ███    ███ ███    ███  ▄███▄▄▄     
+  ███        ███       ▀███████████ ███    ███ ███    ███ ▀▀███▀▀▀     
+  ███    █▀  ███         ███    ███ ███    ███ ███    ███   ███    █▄  
+  ███    ███ ███▌    ▄   ███    ███ ███    ███ ███   ▄███   ███    ███ 
+  ████████▀  █████▄▄██   ███    █▀  ████████▀  ████████▀    ██████████ 
+            </pre>
+        </div>
+
+        <!-- Corner Hit Celebration Toast -->
+        <div id="corner-toast" class="fixed inset-0 flex items-center justify-center pointer-events-none z-30 opacity-0 transition-opacity duration-500">
+            <div class="px-8 py-5 bg-black/95 border-2 border-amber-400 rounded-lg text-amber-300 text-center shadow-2xl">
+                <div class="text-3xl font-extrabold tracking-widest glow-text">★ PERFECT CORNER HIT! ★</div>
+                <div class="text-sm mt-1 opacity-90">+0 BONUS TOKENS GRANTED BY DARIO</div>
+            </div>
+        </div>
+
+        <!-- The Bouncing ASCII Terminal Box -->
+        <div id="dvd-box" class="glow-box select-none">
+            <div class="flex items-center justify-between text-[11px] pb-2 mb-2.5 border-b border-current/30 opacity-80">
+                <span>┌─[ claude-cli@localhost ]─[ ~/production-app ]</span>
+                <span class="px-1.5 py-0.5 text-[10px] bg-red-500/20 text-red-400 border border-red-500/40 rounded">HTTP 429</span>
+            </div>
+
+            <div class="flex items-start gap-4">
+                <!-- Claude ASCII Sparkle / Starburst -->
+                <pre id="dvd-sparkle" class="text-xs leading-none font-bold glow-text shrink-0">
+   .   *   .
+ *  \  |  /  *
+   \ \ | / /
+--=== ❖ ===--
+   / / | \ \
+ *  /  |  \  *
+   '   *   '
+                </pre>
+
+                <div class="text-xs space-y-1.5">
+                    <div class="font-extrabold text-sm tracking-wide glow-text">
+                        ⚠ RATE LIMIT REACHED
+                    </div>
+                    <p id="display-error-msg" class="leading-relaxed opacity-95">
+                        You have exhausted your <span class="underline decoration-dotted">Claude 3.5 Sonnet</span> quota right in the middle of refactoring an 800-line file.
+                    </p>
+                    <div class="pt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] opacity-85">
+                        <span>► RESET AT: <strong id="dvd-reset-label" class="underline">04:00 AM</strong></span>
+                        <span>► ACTION: <strong>TOUCH_GRASS.SH</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-3 pt-2 border-t border-current/25 flex items-center justify-between text-[10px] opacity-75">
+                <span>$ claude --resume "please just fix line 42"</span>
+                <span class="animate-pulse">█</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- ==========================================
+         MODE 2: TERMINAL PANIC / MATRIX RAIN MODE
+         ========================================== -->
+    <main id="mode-2" class="relative w-full h-full hidden overflow-hidden">
+        <!-- Matrix ASCII Canvas -->
+        <canvas id="matrix-canvas" class="absolute inset-0 w-full h-full opacity-55"></canvas>
+
+        <!-- Foreground CLI Panic Overlay -->
+        <div class="relative z-10 w-full h-full flex flex-col justify-between p-6 pt-14 pb-24 pointer-events-none">
+            <!-- Top Token Drain Telemetry -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-5xl mx-auto w-full">
+                <div class="bg-black/80 border border-current/40 p-3 rounded backdrop-blur-xs">
+                    <div class="text-[10px] opacity-60">CONTEXT WINDOW STATUS</div>
+                    <div class="text-lg font-bold glow-text">200,000 / 200,000 TOKENS</div>
+                    <div class="w-full bg-current/15 h-1.5 mt-1.5 rounded overflow-hidden">
+                        <div class="bg-red-500 h-full w-full animate-pulse"></div>
+                    </div>
+                </div>
+                <div class="bg-black/80 border border-current/40 p-3 rounded backdrop-blur-xs">
+                    <div class="text-[10px] opacity-60">REMAINING OUTPUT QUOTA</div>
+                    <div id="panic-token-counter" class="text-lg font-bold text-red-400">0 TOKENS (LOCKED)</div>
+                    <div class="text-[11px] opacity-70 mt-0.5">Fallback model: Haiku (Declined by ego)</div>
+                </div>
+                <div class="bg-black/80 border border-current/40 p-3 rounded backdrop-blur-xs">
+                    <div class="text-[10px] opacity-60">DEVELOPER COPIUM LEVEL</div>
+                    <div id="copium-meter" class="text-lg font-bold glow-text">99.4% CRITICAL</div>
+                    <div class="text-[11px] opacity-70 mt-0.5">Refreshing browser tab every 4s...</div>
+                </div>
+            </div>
+
+            <!-- Center Pulsing Panic Banner -->
+            <div class="my-auto mx-auto max-w-3xl w-full bg-black/90 border-2 border-current glow-box rounded-lg p-6 text-center animate-pulse-slow">
+                <pre class="text-[9px] sm:text-xs leading-tight font-bold glow-text overflow-x-auto">
+ ██╗  ██╗██████╗  █████╗     ██████╗ ██╗   ██╗ ██████╗ ████████╗ █████╗      ██████╗ 
+ ██║  ██║╚════██╗██╔══██╗   ██╔═══██╗██║   ██║██╔═══██╗╚══██╔══╝██╔══██╗    ██╔═████╗
+ ███████║ █████╔╝╚██████║   ██║   ██║██║   ██║██║   ██║   ██║   ███████║    ██║██╔██║
+ ╚════██║██╔═══╝  ╚═══██║   ██║▄▄ ██║██║   ██║██║   ██║   ██║   ██╔══██║    ████╔╝██║
+      ██║███████╗ █████╔╝   ╚██████╔╝╚██████╔╝╚██████╔╝   ██║   ██║  ██║    ╚██████╔╝
+      ╚═╝╚══════╝ ╚════╝     ╚══▀▀═╝  ╚═════╝  ╚═════╝    ╚═╝   ╚═╝  ╚═╝     ╚═════╝ 
+                </pre>
+                <div class="mt-3 text-base sm:text-lg font-bold tracking-widest text-red-400">
+                    [ FATAL: ANTHROPIC_RATE_LIMIT_EXCEEDED ]
+                </div>
+                <p id="panic-custom-msg" class="text-xs sm:text-sm opacity-85 mt-1 max-w-xl mx-auto">
+                    "I apologize for the confusion. You are completely out of messages until <span class="reset-time-inline font-bold underline">04:00 AM</span>."
+                </p>
+            </div>
+
+            <!-- Live Scrolling Failed Prompt Stream -->
+            <div class="max-w-4xl mx-auto w-full bg-black/85 border border-current/40 rounded p-3 h-36 overflow-hidden flex flex-col justify-end font-mono text-xs">
+                <div class="text-[10px] opacity-50 border-b border-current/20 pb-1 mb-1.5 flex justify-between">
+                    <span>LIVE STDERR STREAM // /var/log/claude-code/panic.log</span>
+                    <span>CTRL+C IGNORED</span>
+                </div>
+                <div id="panic-log-stream" class="space-y-1 overflow-hidden"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ==========================================
+         MODE 3: COUNTDOWN & GRASS TOUCHER SIMULATOR
+         ========================================== -->
+    <main id="mode-3" class="relative w-full h-full hidden overflow-hidden flex flex-col justify-between pt-14 pb-20 px-4 sm:px-8">
+        
+        <div class="max-w-4xl mx-auto w-full my-auto space-y-5 z-10">
+            <!-- Terminal Header Box -->
+            <div class="bg-black/85 border-2 border-current glow-box rounded-lg p-5 sm:p-7">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-current/30 pb-3 mb-5">
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg">⏳</span>
+                        <span class="font-bold tracking-wider text-sm sm:text-base glow-text">5-HOUR ROLLING QUOTA COOLDOWN TIMER</span>
+                    </div>
+                    <span class="text-xs px-2.5 py-1 rounded bg-current/10 border border-current/30">
+                        NEXT WINDOW: <strong class="reset-time-inline">04:00 AM</strong>
+                    </span>
+                </div>
+
+                <!-- Giant ASCII / VT323 Digital Countdown -->
+                <div class="text-center py-2">
+                    <div class="text-xs uppercase tracking-widest opacity-70 mb-1">Time Remaining Until Next Prompt</div>
+                    <div id="countdown-digits" class="vt-font text-6xl sm:text-8xl md:text-9xl leading-none tracking-wider glow-text font-bold">
+                        04:59:52
+                    </div>
+                </div>
+
+                <!-- Animated ASCII Progress Bar -->
+                <div class="mt-5 space-y-1.5">
+                    <div class="flex justify-between text-xs">
+                        <span>COOLDOWN RECOVERY PROGRESS</span>
+                        <span id="cooldown-pct-label" class="font-bold">14.2%</span>
+                    </div>
+                    <div id="ascii-progress-bar" class="font-mono text-xs sm:text-sm tracking-tighter bg-black/90 border border-current/40 p-2 rounded text-center overflow-hidden whitespace-nowrap">
+                        [████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
+                    </div>
+                </div>
+
+                <!-- Interactive Humor Metrics Row -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6 pt-4 border-t border-current/25 text-xs">
+                    <div class="bg-black/60 border border-current/30 p-3 rounded flex flex-col justify-between">
+                        <span class="opacity-65 text-[11px]">"I APOLOGIZE" COUNTER</span>
+                        <div class="text-xl font-bold mt-1 glow-text" id="apology-counter">1,492</div>
+                        <span class="text-[10px] opacity-60 mt-0.5">"You're absolutely right!"</span>
+                    </div>
+                    <div class="bg-black/60 border border-current/30 p-3 rounded flex flex-col justify-between">
+                        <span class="opacity-65 text-[11px]">GRASS BLADES TOUCHED</span>
+                        <div class="text-xl font-bold mt-1 text-emerald-400" id="grass-counter">0</div>
+                        <span class="text-[10px] opacity-60 mt-0.5">Click lawn below or press [G]</span>
+                    </div>
+                    <div class="bg-black/60 border border-current/30 p-3 rounded flex flex-col justify-between">
+                        <span class="opacity-65 text-[11px]">UNFINISHED ARTIFACTS</span>
+                        <div class="text-xl font-bold mt-1 text-amber-400">7 FILES</div>
+                        <span class="text-[10px] opacity-60 mt-0.5">Truncated at line 389...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interactive ASCII Grass Touching Simulator Box -->
+            <div id="grass-sim-box" class="bg-black/80 border border-emerald-500/50 rounded-lg p-4 cursor-pointer hover:border-emerald-400 transition-colors relative overflow-hidden group">
+                <div class="flex items-center justify-between text-xs text-emerald-400 mb-2">
+                    <span class="font-bold flex items-center gap-2">
+                        <span>🌱</span> OUTDOOR_SIMULATOR_v1.0.exe (CLICK OR PRESS 'G' TO TOUCH GRASS)
+                    </span>
+                    <span id="grass-status-msg" class="text-[11px] opacity-80">Vitamin D level: Critically Low</span>
+                </div>
+
+                <!-- Animated ASCII Hand + Swaying Grass -->
+                <pre id="ascii-grass-scene" class="text-xs sm:text-sm leading-tight font-mono text-emerald-400/90 text-center select-none overflow-hidden py-1"></pre>
+            </div>
+        </div>
+    </main>
+
+    <!-- ==========================================
+         AUTO-HIDING BOTTOM HUD CONTROL BAR
+         ========================================== -->
+    <nav id="hud-bar" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 px-3 py-2 rounded-xl bg-neutral-950/90 border border-current/40 glow-box backdrop-blur-md text-xs max-w-[96vw]">
+        <!-- Mode Buttons -->
+        <button onclick="switchMode(1)" id="btn-mode-1" class="px-2.5 py-1.5 rounded-lg font-semibold transition flex items-center gap-1.5 bg-current/20 border border-current">
+            <span class="opacity-70">[1]</span> DVD Bounce
+        </button>
+        <button onclick="switchMode(2)" id="btn-mode-2" class="px-2.5 py-1.5 rounded-lg font-semibold transition flex items-center gap-1.5 hover:bg-current/10 border border-transparent">
+            <span class="opacity-70">[2]</span> Terminal Panic
+        </button>
+        <button onclick="switchMode(3)" id="btn-mode-3" class="px-2.5 py-1.5 rounded-lg font-semibold transition flex items-center gap-1.5 hover:bg-current/10 border border-transparent">
+            <span class="opacity-70">[3]</span> Grass & Timer
+        </button>
+
+        <div class="h-4 w-[1px] bg-current/30 mx-1 hidden sm:block"></div>
+
+        <!-- Theme Cycler -->
+        <button onclick="cycleTheme()" class="px-2.5 py-1.5 rounded-lg hover:bg-current/15 border border-current/25 transition flex items-center gap-1" title="Shortcut: C">
+            <span>🎨</span> <span id="theme-label">Claude Orange</span> <span class="opacity-60 text-[10px]">[C]</span>
+        </button>
+
+        <!-- Force Corner Hit (Fun tester in Mode 1) -->
+        <button onclick="triggerCornerHitDemo()" id="btn-corner-demo" class="px-2.5 py-1.5 rounded-lg hover:bg-current/15 border border-current/25 transition flex items-center gap-1" title="Aim Bouncer at Corner">
+            <span>🎯</span> <span class="hidden md:inline">Aim Corner</span>
+        </button>
+
+        <!-- Sound Toggle -->
+        <button onclick="toggleAudio()" id="btn-audio" class="px-2.5 py-1.5 rounded-lg hover:bg-current/15 border border-current/25 transition" title="Toggle Retro Terminal Beeps">
+            🔇 <span class="hidden lg:inline">SFX Off</span>
+        </button>
+
+        <!-- Customize Settings Modal Button -->
+        <button onclick="openModal('settings-modal')" class="px-2.5 py-1.5 rounded-lg hover:bg-current/15 border border-current/25 transition flex items-center gap-1">
+            <span>⚙️</span> <span class="hidden sm:inline">Customize</span>
+        </button>
+
+        <!-- Install as Windows .SCR Guide Button -->
+        <button onclick="openModal('scr-modal')" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 transition flex items-center gap-1 font-semibold">
+            <span>🖥️</span> <span>.SCR Setup</span>
+        </button>
+
+        <!-- Fullscreen Button -->
+        <button onclick="toggleFullScreen()" class="px-2.5 py-1.5 rounded-lg bg-current/20 hover:bg-current/30 border border-current/50 font-bold transition" title="Shortcut: F">
+            ⛶ <span class="hidden sm:inline">Fullscreen</span> <span class="opacity-60 text-[10px]">[F]</span>
+        </button>
+    </nav>
+
+    <!-- ==========================================
+         MODAL 1: CUSTOMIZE ERROR & RESET TIME
+         ========================================== -->
+    <div id="settings-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs hidden items-center justify-center p-4">
+        <div class="bg-neutral-950 border-2 border-current glow-box rounded-xl max-w-md w-full p-6 space-y-4 text-xs sm:text-sm">
+            <div class="flex items-center justify-between border-b border-current/30 pb-3">
+                <h3 class="font-bold text-base glow-text">⚙️ CUSTOMIZE QUOTA LOCKOUT</h3>
+                <button onclick="closeModal('settings-modal')" class="px-2 py-0.5 rounded border border-current/40 hover:bg-current/20">ESC</button>
+            </div>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs opacity-80 mb-1">Quota Reset Time Label (e.g. 4:00 AM or 9:30 PM):</label>
+                    <input id="input-reset-time" type="text" value="04:00 AM" class="w-full px-3 py-2 rounded bg-black border border-current/50 text-current focus:outline-none focus:border-current">
+                </div>
+
+                <div>
+                    <label class="block text-xs opacity-80 mb-1">Countdown Timer Hours Remaining (0.1 to 5.0):</label>
+                    <input id="input-countdown-hours" type="number" step="0.1" min="0.1" max="12" value="4.9" class="w-full px-3 py-2 rounded bg-black border border-current/50 text-current focus:outline-none focus:border-current">
+                </div>
+
+                <div>
+                    <label class="block text-xs opacity-80 mb-1">Custom Rate-Limit Error Message:</label>
+                    <textarea id="input-error-msg" rows="3" class="w-full px-3 py-2 rounded bg-black border border-current/50 text-current focus:outline-none focus:border-current">You have exhausted your Claude 3.5 Sonnet quota right in the middle of refactoring an 800-line file.</textarea>
+                </div>
+
+                <div class="flex items-center justify-between pt-1">
+                    <label class="text-xs opacity-80">DVD Bounce Speed:</label>
+                    <input id="input-speed" type="range" min="1" max="7" step="0.5" value="2.5" class="accent-amber-500 w-40">
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-current/30">
+                <button onclick="closeModal('settings-modal')" class="px-4 py-2 rounded border border-current/30 hover:bg-current/10">Cancel</button>
+                <button onclick="saveCustomSettings()" class="px-4 py-2 rounded bg-current text-black font-bold hover:opacity-90">Apply & Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         MODAL 2: HOW TO RUN AS WINDOWS .SCR / KIOSK
+         ========================================== -->
+    <div id="scr-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs hidden items-center justify-center p-4">
+        <div class="bg-neutral-950 border-2 border-current glow-box rounded-xl max-w-xl w-full p-6 space-y-4 text-xs sm:text-sm">
+            <div class="flex items-center justify-between border-b border-current/30 pb-3">
+                <h3 class="font-bold text-base glow-text">🖥️ USE AS A REAL WINDOWS SCREENSAVER</h3>
+                <button onclick="closeModal('scr-modal')" class="px-2 py-0.5 rounded border border-current/40 hover:bg-current/20">ESC</button>
+            </div>
+
+            <div class="space-y-4 leading-relaxed opacity-95">
+                <div class="p-3 rounded bg-current/10 border border-current/30">
+                    <div class="font-bold text-amber-300 mb-1">Option A: Instant Zero-Install Kiosk Shortcut (Recommended)</div>
+                    <p class="text-xs">Save this file as <code class="bg-black px-1.5 py-0.5 rounded">claude_limit.html</code> on your PC, then run this 1-line command in Windows Run (<kbd class="px-1 border rounded">Win + R</kbd>) or a Desktop Shortcut:</p>
+                    <div class="mt-2 flex items-center gap-2 bg-black p-2 rounded border border-current/30 font-mono text-[11px] overflow-x-auto">
+                        <code id="kiosk-cmd" class="select-all">msedge.exe --kiosk "C:\path\to\claude_limit.html" --edge-kiosk-type=fullscreen</code>
+                        <button onclick="copyCommand('kiosk-cmd')" class="ml-auto shrink-0 px-2 py-1 rounded bg-current/20 hover:bg-current/30 text-[10px]">Copy</button>
+                    </div>
+                </div>
+
+                <div class="p-3 rounded bg-current/10 border border-current/30">
+                    <div class="font-bold text-amber-300 mb-1">Option B: Native Windows <code class="underline">.SCR</code> Screensaver Integration</div>
+                    <ol class="list-decimal list-inside space-y-1.5 text-xs">
+                        <li>Download the free open-source wrapper <strong>WebViewScreensaver</strong> (or <em>HtmlScreensaver</em>) from GitHub.</li>
+                        <li>Rename the `.scr` file to <code class="bg-black px-1 py-0.5 rounded">Claude429.scr</code>, right-click it, and click <strong>Install</strong>.</li>
+                        <li>In the Windows Screensaver settings dialog, point the URL to your saved <code class="bg-black px-1 py-0.5 rounded">claude_limit.html</code> file!</li>
+                    </ol>
+                </div>
+
+                <div class="text-[11px] opacity-75 flex items-center justify-between pt-1">
+                    <span>💡 Tip: Press <strong>[F]</strong> right now and leave your mouse still for 3 seconds to hide all controls!</span>
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-3 border-t border-current/30">
+                <button onclick="closeModal('scr-modal')" class="px-5 py-2 rounded bg-current text-black font-bold hover:opacity-90">Got It</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**************************************************************
+         * STATE & CONFIGURATION
+         **************************************************************/
+        let currentMode = 1;
+        let audioEnabled = false;
+        let audioCtx = null;
+
+        // Themes
+        const themes = [
+            { id: 'claude', name: 'Claude Orange', ansiColors: ['#d97757', '#ff9e64', '#f7768e', '#e0af68', '#bb9af7', '#7dcfff'] },
+            { id: 'amber', name: 'IBM Amber CRT', ansiColors: ['#ffb000', '#ffd573', '#ff8800', '#ffe066'] },
+            { id: 'phosphor', name: 'Phosphor Green', ansiColors: ['#33ff66', '#99ffb3', '#00e676', '#69f0ae'] },
+            { id: 'cyber', name: 'Neon Synth', ansiColors: ['#00f0ff', '#ff2a85', '#b829ff', '#00ff9f'] }
+        ];
+        let themeIndex = 0;
+
+        // DVD Bouncer Physics State
+        const dvdBox = document.getElementById('dvd-box');
+        let dvd = {
+            x: 80,
+            y: 90,
+            vx: 2.5,
+            vy: 2.5,
+            speed: 2.5,
+            wallHits: 0,
+            cornerHits: 0
+        };
+
+        // Countdown & Grass Toucher State
+        let remainingSeconds = 4 * 3600 + 59 * 60 + 52; // ~5 hours
+        const totalWindowSeconds = 5 * 3600;
+        let apologiesCount = 1492;
+        let grassBladesTouched = 0;
+        let grassHandPressed = false;
+        let grassWindTick = 0;
+
+        /**************************************************************
+         * WEB AUDIO SYNTHESIZER (Retro Terminal Beeps)
+         **************************************************************/
+        function playTone(freq = 440, duration = 0.08, type = 'square') {
+            if (!audioEnabled) return;
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) {
+                // Ignore audio errors if blocked
+            }
+        }
+
+        function playCornerFanfare() {
+            if (!audioEnabled) return;
+            [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
+                setTimeout(() => playTone(freq, 0.14, 'triangle'), idx * 90);
+            });
+        }
+
+        function toggleAudio() {
+            audioEnabled = !audioEnabled;
+            const btn = document.getElementById('btn-audio');
+            btn.innerHTML = audioEnabled
+                ? '🔊 <span class="hidden lg:inline">SFX On</span>'
+                : '🔇 <span class="hidden lg:inline">SFX Off</span>';
+            if (audioEnabled) playTone(660, 0.07);
+        }
+
+        /**************************************************************
+         * MODE 1: DVD BOUNCER LOOP
+         **************************************************************/
+        const sparkleFrames = [
+`   .   *   .
+ *  \\  |  /  *
+   \\ \\ | / /
+--=== ❖ ===--
+   / / | \\ \\
+ *  /  |  \\  *
+   '   *   '`,
+`   *   .   *
+ .  \\  |  /  .
+   \\ \\ | / /
+--=== ✦ ===--
+   / / | \\ \\
+ .  /  |  \\  .
+   *   .   *`
+        ];
+
+        function updateDvdBounce() {
+            if (currentMode !== 1) return;
+
+            const rect = dvdBox.getBoundingClientRect();
+            const maxX = window.innerWidth - rect.width;
+            const maxY = window.innerHeight - rect.height;
+            const topOffset = 44; // Account for top status bar
+
+            dvd.x += dvd.vx;
+            dvd.y += dvd.vy;
+
+            let hitX = false;
+            let hitY = false;
+
+            if (dvd.x <= 0) {
+                dvd.x = 0;
+                dvd.vx = Math.abs(dvd.vx);
+                hitX = true;
+            } else if (dvd.x >= maxX) {
+                dvd.x = Math.max(0, maxX);
+                dvd.vx = -Math.abs(dvd.vx);
+                hitX = true;
+            }
+
+            if (dvd.y <= topOffset) {
+                dvd.y = topOffset;
+                dvd.vy = Math.abs(dvd.vy);
+                hitY = true;
+            } else if (dvd.y >= maxY) {
+                dvd.y = Math.max(topOffset, maxY);
+                dvd.vy = -Math.abs(dvd.vy);
+                hitY = true;
+            }
+
+            // Check Corner Hit (within tight tolerance)
+            if (hitX && hitY) {
+                dvd.cornerHits++;
+                document.getElementById('corner-hit-val').textContent = dvd.cornerHits;
+                celebrateCornerHit();
+            } else if (hitX || hitY) {
+                dvd.wallHits++;
+                document.getElementById('wall-hit-val').textContent = dvd.wallHits;
+                changeBouncerAnsiColor();
+                playTone(240, 0.05, 'square');
+            }
+
+            dvdBox.style.transform = `translate3d(${dvd.x}px, ${dvd.y}px, 0)`;
+        }
+
+        function changeBouncerAnsiColor() {
+            const palette = themes[themeIndex].ansiColors;
+            const randomColor = palette[Math.floor(Math.random() * palette.length)];
+            dvdBox.style.borderColor = randomColor;
+            dvdBox.style.color = randomColor;
+            dvdBox.style.boxShadow = `0 0 22px ${randomColor}55, inset 0 0 12px ${randomColor}33`;
+            document.getElementById('dvd-sparkle').textContent =
+                sparkleFrames[(dvd.wallHits + dvd.cornerHits) % sparkleFrames.length];
+        }
+
+        function celebrateCornerHit() {
+            playCornerFanfare();
+            changeBouncerAnsiColor();
+            const toast = document.getElementById('corner-toast');
+            toast.classList.remove('opacity-0');
+            setTimeout(() => toast.classList.add('opacity-0'), 2200);
+        }
+
+        // Aim the DVD box directly toward the bottom-right corner so user can witness a corner hit immediately
+        function triggerCornerHitDemo() {
+            if (currentMode !== 1) switchMode(1);
+            const rect = dvdBox.getBoundingClientRect();
+            const targetX = window.innerWidth - rect.width;
+            const targetY = window.innerHeight - rect.height;
+            const dist = 160;
+            dvd.x = Math.max(20, targetX - dist);
+            dvd.y = Math.max(60, targetY - dist);
+            dvd.vx = dvd.speed;
+            dvd.vy = dvd.speed;
+        }
+
+        /**************************************************************
+         * MODE 2: MATRIX RAIN & TERMINAL PANIC STREAM
+         **************************************************************/
+        const matrixCanvas = document.getElementById('matrix-canvas');
+        const mCtx = matrixCanvas.getContext('2d');
+        let matrixColumns = [];
+        const matrixChars = '429RATELIMITCLAUDE35SONNETQUOTA0TOKENS{}[]/\\<>!@#$%^&*❖✦';
+
+        function resizeMatrixCanvas() {
+            matrixCanvas.width = window.innerWidth;
+            matrixCanvas.height = window.innerHeight;
+            const colCount = Math.floor(matrixCanvas.width / 18);
+            matrixColumns = Array(colCount).fill(1);
+        }
+
+        function drawMatrixRain() {
+            if (currentMode !== 2) return;
+
+            mCtx.fillStyle = 'rgba(11, 10, 9, 0.08)';
+            mCtx.fillRect(0, 0, matrixCanvas.width, matrixCanvas.height);
+
+            const computedPrimary = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#d97757';
+            mCtx.fillStyle = computedPrimary;
+            mCtx.font = '15px "JetBrains Mono", monospace';
+
+            for (let i = 0; i < matrixColumns.length; i++) {
+                const char = matrixChars[Math.floor(Math.random() * matrixChars.length)];
+                mCtx.fillText(char, i * 18, matrixColumns[i] * 18);
+
+                if (matrixColumns[i] * 18 > matrixCanvas.height && Math.random() > 0.975) {
+                    matrixColumns[i] = 0;
+                }
+                matrixColumns[i]++;
+            }
+        }
+
+        const panicMessages = [
+            'POST /v1/messages HTTP/1.1 -> 429 Too Many Requests (rate_limit_error)',
+            'Error: Number of request tokens has exceeded your 5-hour rolling tier quota.',
+            'Thinking... [ABORTED AT TOKEN 4,091: QUOTA EXHAUSTED]',
+            'Prompt rejected: "can you fix the bug you just introduced?" -> 0 tokens left',
+            'Context window: 199,984 / 200,000 tokens saturated. Compaction failed.',
+            'WARN: Switching to Claude 3 Haiku refused by user pride.',
+            'Retry-After: 17,982 seconds. Suggested remediation: /usr/bin/touch-grass',
+            'Claude: "I apologize for the oversight. Also, goodbye until 4:00 AM."'
+        ];
+
+        function appendPanicLog() {
+            if (currentMode !== 2) return;
+            const container = document.getElementById('panic-log-stream');
+            const line = document.createElement('div');
+            const ts = new Date().toISOString().split('T')[1].slice(0, 8);
+            const msg = panicMessages[Math.floor(Math.random() * panicMessages.length)];
+            line.innerHTML = `<span class="opacity-50">[${ts}]</span> <span class="text-red-400">ERR!</span> ${msg}`;
+            container.appendChild(line);
+            while (container.children.length > 5) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        /**************************************************************
+         * MODE 3: COUNTDOWN & INTERACTIVE ASCII GRASS SIMULATOR
+         **************************************************************/
+        function updateCountdownAndGrass() {
+            if (remainingSeconds > 0) remainingSeconds--;
+
+            const hrs = String(Math.floor(remainingSeconds / 3600)).padStart(2, '0');
+            const mins = String(Math.floor((remainingSeconds % 3600) / 60)).padStart(2, '0');
+            const secs = String(remainingSeconds % 60).padStart(2, '0');
+
+            document.getElementById('countdown-digits').textContent = `${hrs}:${mins}:${secs}`;
+
+            // Progress bar calculation
+            const elapsed = Math.max(0, totalWindowSeconds - remainingSeconds);
+            const pct = Math.min(100, Math.max(1, (elapsed / totalWindowSeconds) * 100));
+            document.getElementById('cooldown-pct-label').textContent = `${pct.toFixed(2)}%`;
+
+            const totalBars = 34;
+            const filledBars = Math.round((pct / 100) * totalBars);
+            const barStr = '[' + '█'.repeat(filledBars) + '░'.repeat(totalBars - filledBars) + ']';
+            document.getElementById('ascii-progress-bar').textContent = barStr;
+
+            // Increment apology counter occasionally
+            if (Math.random() > 0.45) {
+                apologiesCount++;
+                document.getElementById('apology-counter').textContent = apologiesCount.toLocaleString();
+            }
+        }
+
+        function renderGrassScene() {
+            if (currentMode !== 3) return;
+            grassWindTick++;
+            const sway = grassWindTick % 2 === 0;
+
+            const handArt = grassHandPressed
+                ? [
+                    "              |   |              ",
+                    "           .--|---|--.           ",
+                    "          (  TOUCHING! )         ",
+                    "           `--.___.--'           "
+                  ]
+                : [
+                    "        ( Click or Press G )     ",
+                    "              .--.               ",
+                    "             /    \\              ",
+                    "                                 "
+                  ];
+
+            const lawnRow1 = sway
+                ? "  \\|/  /|\\  \\|/  /|\\  \\|/  /|\\  \\|/  /|\\  \\|/  /|\\  \\|/  /|\\  "
+                : "  /|\\  \\|/  /|\\  \\|/  /|\\  \\|/  /|\\  \\|/  /|\\  \\|/  /|\\  \\|/  ";
+            const lawnRow2 = "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^";
+
+            document.getElementById('ascii-grass-scene').textContent =
+                handArt.join('\n') + '\n' + lawnRow1 + '\n' + lawnRow2;
+        }
+
+        function touchGrassAction() {
+            grassBladesTouched += Math.floor(Math.random() * 7) + 3;
+            document.getElementById('grass-counter').textContent = grassBladesTouched.toLocaleString();
+            grassHandPressed = true;
+            playTone(587.33, 0.06, 'sine');
+
+            const statuses = [
+                'Serotonin +2% (Still rate-limited though)',
+                'You felt chlorophyll! Claude is proud of you.',
+                'Sunlight detected. Compiler anxiety decreasing...',
+                'Grass touched! Quota still locked until reset window.'
+            ];
+            document.getElementById('grass-status-msg').textContent =
+                statuses[grassBladesTouched % statuses.length];
+
+            renderGrassScene();
+            setTimeout(() => {
+                grassHandPressed = false;
+                renderGrassScene();
+            }, 320);
+        }
+
+        document.getElementById('grass-sim-box').addEventListener('click', touchGrassAction);
+
+        /**************************************************************
+         * HUD & MODE MANAGEMENT
+         **************************************************************/
+        function switchMode(modeNum) {
+            currentMode = modeNum;
+            [1, 2, 3].forEach(n => {
+                const el = document.getElementById(`mode-${n}`);
+                const btn = document.getElementById(`btn-mode-${n}`);
+                if (n === modeNum) {
+                    el.classList.remove('hidden');
+                    btn.className = 'px-2.5 py-1.5 rounded-lg font-semibold transition flex items-center gap-1.5 bg-current/20 border border-current';
+                } else {
+                    el.classList.add('hidden');
+                    btn.className = 'px-2.5 py-1.5 rounded-lg font-semibold transition flex items-center gap-1.5 hover:bg-current/10 border border-transparent';
+                }
+            });
+
+            if (modeNum === 2) resizeMatrixCanvas();
+            if (modeNum === 3) renderGrassScene();
+            playTone(480, 0.04);
+        }
+
+        function cycleTheme() {
+            themeIndex = (themeIndex + 1) % themes.length;
+            const theme = themes[themeIndex];
+            document.body.setAttribute('data-theme', theme.id);
+            document.getElementById('theme-label').textContent = theme.name;
+            // Reset DVD box inline color so it matches new theme immediately
+            dvdBox.style.borderColor = '';
+            dvdBox.style.color = '';
+            dvdBox.style.boxShadow = '';
+            playTone(720, 0.05);
+        }
+
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen().catch(() => {});
+            }
+        }
+
+        function openModal(id) {
+            const modal = document.getElementById(id);
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeModal(id) {
+            const modal = document.getElementById(id);
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function saveCustomSettings() {
+            const resetTime = document.getElementById('input-reset-time').value.trim() || '04:00 AM';
+            const hours = parseFloat(document.getElementById('input-countdown-hours').value) || 4.5;
+            const errorMsg = document.getElementById('input-error-msg').value.trim();
+            const speed = parseFloat(document.getElementById('input-speed').value) || 2.5;
+
+            document.getElementById('dvd-reset-label').textContent = resetTime;
+            document.querySelectorAll('.reset-time-inline').forEach(el => el.textContent = resetTime);
+
+            if (errorMsg) {
+                document.getElementById('display-error-msg').textContent = errorMsg;
+            }
+
+            remainingSeconds = Math.floor(hours * 3600);
+            dvd.speed = speed;
+            dvd.vx = Math.sign(dvd.vx || 1) * speed;
+            dvd.vy = Math.sign(dvd.vy || 1) * speed;
+
+            closeModal('settings-modal');
+            playTone(880, 0.08);
+        }
+
+        function copyCommand(elemId) {
+            const text = document.getElementById(elemId).textContent;
+            const temp = document.createElement('textarea');
+            temp.value = text;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand('copy');
+            document.body.removeChild(temp);
+            playTone(920, 0.08);
+        }
+
+        /**************************************************************
+         * IDLE MOUSE AUTO-HIDE HUD & KEYBOARD SHORTCUTS
+         **************************************************************/
+        let idleTimeout;
+        const hudBar = document.getElementById('hud-bar');
+
+        function resetIdleTimer() {
+            hudBar.classList.remove('hud-hidden');
+            document.body.classList.remove('cursor-none-mode');
+            clearTimeout(idleTimeout);
+            idleTimeout = setTimeout(() => {
+                // Only auto-hide if no modal is open
+                const settingsOpen = !document.getElementById('settings-modal').classList.contains('hidden');
+                const scrOpen = !document.getElementById('scr-modal').classList.contains('hidden');
+                if (!settingsOpen && !scrOpen) {
+                    hudBar.classList.add('hud-hidden');
+                    document.body.classList.add('cursor-none-mode');
+                }
+            }, 3200);
+        }
+
+        window.addEventListener('mousemove', resetIdleTimer);
+        window.addEventListener('mousedown', resetIdleTimer);
+        window.addEventListener('touchstart', resetIdleTimer);
+
+        window.addEventListener('keydown', (e) => {
+            resetIdleTimer();
+            const tag = document.activeElement.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') {
+                if (e.key === 'Escape') {
+                    closeModal('settings-modal');
+                    closeModal('scr-modal');
+                }
+                return;
+            }
+
+            if (e.key === '1') switchMode(1);
+            else if (e.key === '2') switchMode(2);
+            else if (e.key === '3') switchMode(3);
+            else if (e.key.toLowerCase() === 'c') cycleTheme();
+            else if (e.key.toLowerCase() === 'f') toggleFullScreen();
+            else if (e.key.toLowerCase() === 'g' && currentMode === 3) touchGrassAction();
+            else if (e.key === 'Escape') {
+                closeModal('settings-modal');
+                closeModal('scr-modal');
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            resizeMatrixCanvas();
+        });
+
+        /**************************************************************
+         * MASTER ANIMATION & TELEMETRY TIMERS
+         **************************************************************/
+        function masterLoop() {
+            updateDvdBounce();
+            requestAnimationFrame(masterLoop);
+        }
+
+        window.onload = function () {
+            resizeMatrixCanvas();
+            renderGrassScene();
+            resetIdleTimer();
+
+            // Start 60fps DVD loop
+            requestAnimationFrame(masterLoop);
+
+            // Matrix Rain & Grass Wind interval
+            setInterval(() => {
+                drawMatrixRain();
+                renderGrassScene();
+            }, 60);
+
+            // 1-second Clock, Countdown & Panic Log interval
+            setInterval(() => {
+                const now = new Date();
+                document.getElementById('live-clock').textContent = now.toLocaleTimeString();
+                updateCountdownAndGrass();
+                appendPanicLog();
+            }, 1000);
+        };
+    </script>
+</body>
+</html>
